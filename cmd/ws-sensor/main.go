@@ -1,52 +1,57 @@
 package main
 
 import (
+	"flag"
 	"fmt"
-	"github.com/gorilla/websocket"
+	"github.com/gonium/websocketsensors"
 	"log"
 	"time"
 )
 
-var cstDialer = websocket.Dialer{
-	Subprotocols:    []string{"p1", "p2"},
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-}
+const (
+	defaultaction = "echo"
+	defaulthost   = "ws://localhost:8080"
+)
 
-func sendRecv(ws *websocket.Conn, message string) (response string, err error) {
-	if err = ws.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
-		return
+var action = flag.String("action", defaultaction, "which subcommand to run, {echo|...}")
+var host = flag.String("url", defaulthost, "endpoint of the websocket server")
+
+func init() {
+	flag.Parse()
+	if *action == defaultaction {
+		log.Printf("running default echo action (see -action parameter)\r\n")
 	}
-	if err = ws.WriteMessage(websocket.TextMessage, []byte(message)); err != nil {
-		return
+	if *host == defaulthost {
+		log.Printf("Using default server at %s\r\n", *host)
 	}
-	if err = ws.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
-		return
-	}
-	_, byteresponse, readerr := ws.ReadMessage()
-	if readerr != nil {
-		return "", readerr
-	}
-	//log.Printf("message=%s, want %s", p, message)
-	return string(byteresponse), nil
 }
 
 func main() {
 	log.Printf("WS-Sensor started")
-	ws, _, err := cstDialer.Dial("ws://localhost:8080/echo", nil)
+	var hosturl string
+	if *action == "echo" {
+		hosturl = fmt.Sprintf("%s/echo", *host)
+	}
+	client, err := websocketsensors.NewWSSClient(hosturl)
 	if err != nil {
-		log.Fatalf("Dial: %v", err)
+		log.Fatalf("Failed to connect to %s: %v", hosturl, err)
 	}
-	defer ws.Close()
-	for i := 0; i < 10; i++ {
-		msg, err := sendRecv(ws, fmt.Sprintf("Hello %d", i))
-		if err != nil {
-			log.Printf("Failed to send message: %s", err)
-		} else {
-			log.Printf("Received answer: %s", msg)
-		}
-		time.Sleep(time.Second)
-	}
-	log.Printf("WS-Sensor finished")
+	defer client.Close()
 
+	switch *action {
+	case "echo":
+		for i := 0; i < 10; i++ {
+			request := fmt.Sprintf("Hello %d", i)
+			msg, err := client.SendRecv(request)
+			if err != nil {
+				log.Printf("Failed to send message: %s", err)
+			} else {
+				log.Printf("Requested %s, received answer: %s", request, msg)
+			}
+			time.Sleep(time.Second)
+		}
+		log.Printf("WS-Sensor finished")
+	default:
+		log.Fatalf("Unknown action %s - aborting\r\n", *action)
+	}
 }
